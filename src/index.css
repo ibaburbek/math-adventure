@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* Character 2.5D Animation States */
+  @keyframes character-idle {
+    0%, 100% {
+      transform: translateY(0px) scale(1, 1);
+    }
+    50% {
+      transform: translateY(-4px) scale(1.01, 0.99);
+    }
+  }
+
+  @keyframes character-walk {
+    0%, 100% {
+      transform: translateY(0) rotate(0deg);
+    }
+    25% {
+      transform: translateY(-3px) rotate(-3deg);
+    }
+    75% {
+      transform: translateY(-3px) rotate(3deg);
+    }
+  }
+
+  @keyframes character-jump {
+    0%, 100% {
+      transform: translateY(0) scale(1, 1);
+    }
+    30% {
+      transform: translateY(-16px) scale(0.96, 1.05);
+    }
+    70% {
+      transform: translateY(2px) scale(1.05, 0.95);
+    }
+  }
+
+  @keyframes character-celebrate {
+    0%, 100% {
+      transform: translateY(0) rotate(0deg) scale(1);
+    }
+    25% {
+      transform: translateY(-12px) rotate(-6deg) scale(1.08);
+    }
+    75% {
+      transform: translateY(-8px) rotate(6deg) scale(1.08);
+    }
+  }
+
+  @keyframes character-think {
+    0%, 100% {
+      transform: rotate(0deg);
+    }
+    50% {
+      transform: rotate(-5deg) translateY(-2px);
+    }
+  }
+
+  @keyframes character-oops {
+    0%, 100% {
+      transform: translateY(0) rotate(0deg);
+    }
+    20%, 60% {
+      transform: translateX(-3px) rotate(-2deg);
+    }
+    40%, 80% {
+      transform: translateX(3px) rotate(2deg);
+    }
+  }
+
+  @keyframes spin-slow {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes float-gentle {
+    0%, 100% {
+      transform: translateY(0px);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+
+  .animate-character-idle {
+    animation: character-idle 3s ease-in-out infinite;
+  }
+
+  .animate-character-walk {
+    animation: character-walk 0.8s ease-in-out infinite;
+  }
+
+  .animate-character-jump {
+    animation: character-jump 0.6s ease-in-out;
+  }
+
+  .animate-character-celebrate {
+    animation: character-celebrate 0.8s ease-in-out infinite;
+  }
+
+  .animate-character-think {
+    animation: character-think 2s ease-in-out infinite;
+  }
+
+  .animate-character-oops {
+    animation: character-oops 0.6s ease-in-out;
+  }
+
+  .animate-spin-slow {
+    animation: spin-slow 12s linear infinite;
+  }
+
+  .animate-float-gentle {
+    animation: float-gentle 4s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-character-idle,
+  .animate-character-walk,
+  .animate-character-jump,
+  .animate-character-celebrate,
+  .animate-character-think,
+  .animate-character-oops,
+  .animate-spin-slow,
+  .animate-float-gentle {
+    animation: none !important;
+  }
+}

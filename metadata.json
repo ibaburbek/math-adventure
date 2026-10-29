@@ -1,0 +1,8 @@
+{
+  "name": "Math Adventure",
+  "description": "An enchanting educational math adventure game set in a magical forest path with levels, rewards, character progression, and teacher controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
