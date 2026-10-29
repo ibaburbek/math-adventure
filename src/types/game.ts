@@ -104,8 +104,38 @@ export interface ReviewSubmission {
   studentName?: string;
 }
 
+export interface StudentAccount {
+  student_id: string;
+  student_code: string;
+  display_name: string;
+  selected_character_id?: string;
+  points?: number;
+  completed_levels_count?: number;
+  completed_questions_count?: number;
+  last_active_at?: string;
+  last_login_at?: string;
+  failed_attempts?: number;
+  is_locked?: boolean;
+}
+
+export interface LoginResult {
+  success: boolean;
+  code?: 'STUDENT_NOT_FOUND' | 'INVALID_PIN' | 'ACCOUNT_LOCKED' | 'NO_PIN_SET' | 'SERVER_ERROR';
+  message?: string;
+  student?: {
+    student_id: string;
+    student_code: string;
+    display_name: string;
+    selected_character_id?: string;
+  };
+  progress?: Partial<StudentProgress>;
+  remainingAttempts?: number;
+  lockedUntil?: string;
+}
+
 export interface StudentProgress {
   studentId?: string;
+  studentCode?: string;
   studentName?: string;
   selectedCharacterId: string;
   equippedHat?: string;

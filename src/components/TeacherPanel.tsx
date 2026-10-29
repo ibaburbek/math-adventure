@@ -28,8 +28,13 @@ import {
   updateReviewStatusInCloud,
   getSupabaseConfig,
   updateSupabaseConfig,
-  isSupabaseConfigured
+  isSupabaseConfigured,
+  teacherGetStudents,
+  teacherCreateStudent,
+  teacherResetStudentPin,
+  teacherDeleteStudent
 } from '../lib/supabase';
+import { StudentAccount } from '../types/game';
 import {
   Lock,
   KeyRound,
@@ -56,14 +61,18 @@ import {
   RefreshCw,
   Copy,
   Database,
-  ExternalLink
+  ExternalLink,
+  Users,
+  UserPlus,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 
 interface TeacherPanelProps {
   state: GameState;
   language: Language;
   soundEnabled: boolean;
-  initialTab?: 'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud';
+  initialTab?: 'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud' | 'students';
   onClose: () => void;
   onUpdateState: (updater: (prev: GameState) => GameState) => void;
   onResetProgress: () => void;
@@ -91,7 +100,19 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
   const [pinError, setPinError] = useState('');
 
   // Active Tab inside Teacher Panel
-  const [activeTab, setActiveTab] = useState<'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud'>(initialTab || 'levels');
+  const [activeTab, setActiveTab] = useState<'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud' | 'students'>(initialTab || 'levels');
+
+  // Student Management State
+  const [studentList, setStudentList] = useState<StudentAccount[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(false);
+  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+  const [newStudentCode, setNewStudentCode] = useState('');
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentPin, setNewStudentPin] = useState('');
+  const [studentActionError, setStudentActionError] = useState('');
+  const [studentActionSuccess, setStudentActionSuccess] = useState('');
+  const [resetPinModalStudent, setResetPinModalStudent] = useState<StudentAccount | null>(null);
+  const [resetNewPin, setResetNewPin] = useState('');
 
   // Level Management State
   const [selectedLevelId, setSelectedLevelId] = useState<string>(levels[0]?.id || '');
@@ -118,6 +139,29 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const questionImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Load students from Supabase
+  const loadStudents = async () => {
+    if (!isSupabaseConfigured()) return;
+    setIsLoadingStudents(true);
+    setStudentActionError('');
+    try {
+      const data = await teacherGetStudents();
+      if (data) {
+        setStudentList(data);
+      }
+    } catch (err: any) {
+      setStudentActionError(err.message || 'Failed to load students.');
+    } finally {
+      setIsLoadingStudents(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'students' && isAuthenticated) {
+      loadStudents();
+    }
+  }, [activeTab, isAuthenticated]);
 
   // Handle PIN Login / Setup
   const handlePinSubmit = (e: React.FormEvent) => {
@@ -524,7 +568,87 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
     }
   };
 
+  // Student Actions
+  const handleCreateStudentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStudentCode.trim() || !newStudentName.trim() || !newStudentPin.trim()) return;
+
+    if (newStudentPin.trim().length < 4) {
+      setStudentActionError('PIN must be at least 4 digits');
+      return;
+    }
+
+    setStudentActionError('');
+    setStudentActionSuccess('');
+    soundManager.playClick(soundEnabled);
+
+    const res = await teacherCreateStudent(
+      newStudentCode.trim(),
+      newStudentName.trim(),
+      newStudentPin.trim()
+    );
+
+    if (res.success) {
+      soundManager.playCorrect(soundEnabled);
+      setStudentActionSuccess(t.studentCreatedSuccess);
+      setNewStudentCode('');
+      setNewStudentName('');
+      setNewStudentPin('');
+      setIsAddStudentOpen(false);
+      loadStudents();
+    } else {
+      soundManager.playWrong(soundEnabled);
+      setStudentActionError(res.message || 'Failed to create student');
+    }
+  };
+
+  const handleResetPinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetPinModalStudent || !resetNewPin.trim()) return;
+
+    if (resetNewPin.trim().length < 4) {
+      setStudentActionError('PIN must be at least 4 digits');
+      return;
+    }
+
+    soundManager.playClick(soundEnabled);
+    const res = await teacherResetStudentPin(resetPinModalStudent.student_id, resetNewPin.trim());
+
+    if (res.success) {
+      soundManager.playCorrect(soundEnabled);
+      setStudentActionSuccess(res.message || 'PIN reset successfully!');
+      setResetPinModalStudent(null);
+      setResetNewPin('');
+      loadStudents();
+    } else {
+      soundManager.playWrong(soundEnabled);
+      setStudentActionError(res.message || 'Failed to reset PIN');
+    }
+  };
+
+  const handleDeleteStudentClick = async (student: StudentAccount) => {
+    if (!window.confirm(`${t.deleteStudentConfirm}\n${student.display_name} (${student.student_code})`)) {
+      return;
+    }
+
+    soundManager.playClick(soundEnabled);
+    const res = await teacherDeleteStudent(student.student_id);
+    if (res.success) {
+      soundManager.playCorrect(soundEnabled);
+      setStudentActionSuccess('Student deleted.');
+      loadStudents();
+    } else {
+      soundManager.playWrong(soundEnabled);
+      setStudentActionError(res.message || 'Failed to delete student');
+    }
+  };
+
   const migrationSql = `-- Math Adventure Migration SQL for Supabase SQL Editor
+-- Includes Tables, pgcrypto, Student PIN Authentication RPCs & RLS Policies
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- 1. Levels
 CREATE TABLE IF NOT EXISTS public.math_levels (
     id TEXT PRIMARY KEY,
     level_order INT NOT NULL,
@@ -540,6 +664,7 @@ CREATE TABLE IF NOT EXISTS public.math_levels (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 2. Questions
 CREATE TABLE IF NOT EXISTS public.math_questions (
     id TEXT PRIMARY KEY,
     level_id TEXT NOT NULL REFERENCES public.math_levels(id) ON DELETE CASCADE,
@@ -558,14 +683,29 @@ CREATE TABLE IF NOT EXISTS public.math_questions (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 3. Students (with unique student_code, pin_hash & rate limiting)
 CREATE TABLE IF NOT EXISTS public.math_students (
     student_id TEXT PRIMARY KEY,
+    student_code TEXT,
     display_name TEXT NOT NULL,
     selected_character_id TEXT DEFAULT 'alen',
+    pin_hash TEXT,
+    failed_attempts INT DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     last_active_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure columns exist if table was created previously
+ALTER TABLE public.math_students ADD COLUMN IF NOT EXISTS student_code TEXT;
+ALTER TABLE public.math_students ADD COLUMN IF NOT EXISTS pin_hash TEXT;
+ALTER TABLE public.math_students ADD COLUMN IF NOT EXISTS failed_attempts INT DEFAULT 0;
+ALTER TABLE public.math_students ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+ALTER TABLE public.math_students ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_math_students_code ON public.math_students(lower(student_code));
+
+-- 4. Student Progress
 CREATE TABLE IF NOT EXISTS public.math_student_progress (
     student_id TEXT PRIMARY KEY REFERENCES public.math_students(student_id) ON DELETE CASCADE,
     points INT DEFAULT 0,
@@ -584,6 +724,7 @@ CREATE TABLE IF NOT EXISTS public.math_student_progress (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 5. Review Submissions
 CREATE TABLE IF NOT EXISTS public.math_review_submissions (
     id TEXT PRIMARY KEY,
     student_id TEXT NOT NULL REFERENCES public.math_students(student_id) ON DELETE CASCADE,
@@ -610,9 +751,149 @@ CREATE POLICY "Public read levels" ON public.math_levels FOR SELECT USING (true)
 CREATE POLICY "Public upsert levels" ON public.math_levels FOR ALL USING (true);
 CREATE POLICY "Public read questions" ON public.math_questions FOR SELECT USING (true);
 CREATE POLICY "Public upsert questions" ON public.math_questions FOR ALL USING (true);
-CREATE POLICY "Public read students" ON public.math_students FOR ALL USING (true);
+CREATE POLICY "Public read students" ON public.math_students FOR SELECT USING (true);
 CREATE POLICY "Public read progress" ON public.math_student_progress FOR ALL USING (true);
-CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL USING (true);`;
+CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL USING (true);
+
+-- SECURE RPC: Student Login with server-side PIN verification & rate-limiting
+CREATE OR REPLACE FUNCTION public.student_login(p_identifier TEXT, p_pin TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+    v_student RECORD;
+    v_progress RECORD;
+    v_cleaned_id TEXT;
+    v_pin_match BOOLEAN;
+BEGIN
+    v_cleaned_id := lower(trim(p_identifier));
+    SELECT * INTO v_student FROM public.math_students
+    WHERE lower(student_code) = v_cleaned_id OR lower(trim(display_name)) = v_cleaned_id
+    LIMIT 1;
+
+    IF v_student IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'code', 'STUDENT_NOT_FOUND', 'message', 'Student account not found.');
+    END IF;
+
+    IF v_student.locked_until IS NOT NULL AND v_student.locked_until > NOW() THEN
+        RETURN jsonb_build_object('success', false, 'code', 'ACCOUNT_LOCKED', 'message', 'Account temporarily locked. Please wait 5 minutes.', 'locked_until', v_student.locked_until);
+    END IF;
+
+    IF v_student.pin_hash IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'code', 'NO_PIN_SET', 'message', 'No PIN set for this student.');
+    END IF;
+
+    v_pin_match := (v_student.pin_hash = crypt(p_pin, v_student.pin_hash));
+    IF NOT v_pin_match THEN
+        UPDATE public.math_students
+        SET failed_attempts = COALESCE(failed_attempts, 0) + 1,
+            locked_until = CASE WHEN COALESCE(failed_attempts, 0) + 1 >= 5 THEN NOW() + INTERVAL '5 minutes' ELSE NULL END
+        WHERE student_id = v_student.student_id;
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_PIN', 'message', 'Incorrect PIN.', 'remaining_attempts', GREATEST(0, 5 - (COALESCE(v_student.failed_attempts, 0) + 1)));
+    END IF;
+
+    UPDATE public.math_students
+    SET failed_attempts = 0, locked_until = NULL, last_login_at = NOW(), last_active_at = NOW()
+    WHERE student_id = v_student.student_id;
+
+    SELECT * INTO v_progress FROM public.math_student_progress WHERE student_id = v_student.student_id;
+    IF v_progress IS NULL THEN
+        INSERT INTO public.math_student_progress (student_id, points, current_level_id, updated_at)
+        VALUES (v_student.student_id, 0, 'lvl_1_arithmetic', NOW())
+        RETURNING * INTO v_progress;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'student', jsonb_build_object('student_id', v_student.student_id, 'student_code', v_student.student_code, 'display_name', v_student.display_name, 'selected_character_id', v_student.selected_character_id),
+        'progress', jsonb_build_object('studentId', v_progress.student_id, 'studentCode', v_student.student_code, 'studentName', v_student.display_name, 'points', v_progress.points, 'completedQuestionIds', v_progress.completed_question_ids, 'completedLevelIds', v_progress.completed_level_ids, 'openedChestLevelIds', v_progress.opened_chest_level_ids, 'unlockedCharacters', v_progress.unlocked_characters, 'ownedItems', v_progress.owned_items, 'equippedHat', v_progress.equipped_hat, 'equippedClothing', v_progress.equipped_clothing, 'equippedAccessory', v_progress.equipped_accessory, 'currentLevelId', v_progress.current_level_id, 'totalAttempts', v_progress.total_attempts, 'incorrectAttemptsCount', v_progress.incorrect_attempts_breakdown, 'hasFinishedFirstSetup', v_progress.has_finished_setup)
+    );
+END;
+$$;
+
+-- SECURE RPC: Teacher create student with hashed PIN
+CREATE OR REPLACE FUNCTION public.teacher_create_student(p_student_code TEXT, p_display_name TEXT, p_pin TEXT, p_initial_character TEXT DEFAULT 'alen')
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+    v_clean_code TEXT;
+    v_student_id TEXT;
+    v_hashed_pin TEXT;
+BEGIN
+    v_clean_code := upper(trim(p_student_code));
+    IF length(v_clean_code) < 2 THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Code must be at least 2 characters.');
+    END IF;
+    IF length(trim(p_pin)) < 4 THEN
+        RETURN jsonb_build_object('success', false, 'message', 'PIN must be at least 4 digits.');
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.math_students WHERE lower(student_code) = lower(v_clean_code)) THEN
+        RETURN jsonb_build_object('success', false, 'message', 'A student with this code already exists.');
+    END IF;
+
+    v_student_id := 'std_' || lower(replace(v_clean_code, ' ', '_')) || '_' || floor(random() * 8999 + 1000)::text;
+    v_hashed_pin := crypt(trim(p_pin), gen_salt('bf', 8));
+
+    INSERT INTO public.math_students (student_id, student_code, display_name, selected_character_id, pin_hash, created_at, last_active_at)
+    VALUES (v_student_id, v_clean_code, trim(p_display_name), p_initial_character, v_hashed_pin, NOW(), NOW());
+
+    INSERT INTO public.math_student_progress (student_id, points, current_level_id, updated_at)
+    VALUES (v_student_id, 0, 'lvl_1_arithmetic', NOW());
+
+    RETURN jsonb_build_object('success', true, 'student', jsonb_build_object('student_id', v_student_id, 'student_code', v_clean_code, 'display_name', trim(p_display_name), 'selected_character_id', p_initial_character));
+END;
+$$;
+
+-- SECURE RPC: Teacher reset student PIN
+CREATE OR REPLACE FUNCTION public.teacher_reset_student_pin(p_student_id TEXT, p_new_pin TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+BEGIN
+    IF length(trim(p_new_pin)) < 4 THEN
+        RETURN jsonb_build_object('success', false, 'message', 'PIN must be at least 4 digits.');
+    END IF;
+    UPDATE public.math_students
+    SET pin_hash = crypt(trim(p_new_pin), gen_salt('bf', 8)), failed_attempts = 0, locked_until = NULL, last_active_at = NOW()
+    WHERE student_id = p_student_id;
+    RETURN jsonb_build_object('success', true, 'message', 'PIN reset successfully.');
+END;
+$$;
+
+-- SECURE RPC: Teacher list students (pin_hash is NEVER exposed)
+CREATE OR REPLACE FUNCTION public.teacher_get_students()
+RETURNS TABLE (student_id TEXT, student_code TEXT, display_name TEXT, selected_character_id TEXT, points INT, completed_levels_count INT, completed_questions_count INT, last_active_at TIMESTAMPTZ, last_login_at TIMESTAMPTZ, failed_attempts INT, is_locked BOOLEAN)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+    SELECT s.student_id, s.student_code, s.display_name, s.selected_character_id, COALESCE(p.points, 0) AS points, COALESCE(cardinality(p.completed_level_ids), 0) AS completed_levels_count, COALESCE(cardinality(p.completed_question_ids), 0) AS completed_questions_count, s.last_active_at, s.last_login_at, COALESCE(s.failed_attempts, 0) AS failed_attempts, (s.locked_until IS NOT NULL AND s.locked_until > NOW()) AS is_locked
+    FROM public.math_students s
+    LEFT JOIN public.math_student_progress p ON p.student_id = s.student_id
+    ORDER BY s.display_name ASC;
+$$;
+
+-- SECURE RPC: Teacher delete student
+CREATE OR REPLACE FUNCTION public.teacher_delete_student(p_student_id TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    DELETE FROM public.math_students WHERE student_id = p_student_id;
+    RETURN jsonb_build_object('success', true);
+END;
+$$;
+
+NOTIFY pgrst, 'reload schema';`;
 
   // IF NOT AUTHENTICATED: RENDER PIN LOGIN/SETUP SCREEN
   if (!isAuthenticated) {
@@ -778,6 +1059,24 @@ CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL US
           >
             <BarChart2 className="w-4 h-4" />
             <span>{t.tabAnalytics}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('students')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+              activeTab === 'students'
+                ? 'bg-emerald-600 text-white shadow'
+                : 'text-slate-300 hover:bg-slate-800/80'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>{t.tabStudents}</span>
+            {studentList.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-900/60 text-[10px] text-emerald-300">
+                {studentList.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -1212,6 +1511,185 @@ CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL US
                   <span>{t.resetProgressBtn}</span>
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* TAB: STUDENTS MANAGEMENT */}
+          {activeTab === 'students' && (
+            <div className="space-y-6">
+              {/* Header Action Card */}
+              <div className="p-5 rounded-2xl bg-slate-950/70 border border-emerald-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                      <span>{t.studentListTitle}</span>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-xs font-mono">
+                        {studentList.length}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      {language === 'kk'
+                        ? 'Оқушыларға жеке код пен құпия 4 таңбалы PIN тағайындаңыз. Нәтижелер автоматты сақталады.'
+                        : 'Создавайте профили учеников и назначайте личные 4-значные PIN-коды для облачного сохранения.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={loadStudents}
+                    disabled={isLoadingStudents}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+                    title="Жаңарту / Обновить"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingStudents ? 'animate-spin' : ''}`} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentActionError('');
+                      setStudentActionSuccess('');
+                      setIsAddStudentOpen(true);
+                    }}
+                    className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow cursor-pointer transition-all"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>{t.createStudentBtn}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Notification Messages */}
+              {studentActionSuccess && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 flex items-center gap-2 text-xs font-semibold text-emerald-200">
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{studentActionSuccess}</span>
+                </div>
+              )}
+
+              {studentActionError && (
+                <div className="p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/50 flex items-center gap-2 text-xs font-semibold text-rose-200">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{studentActionError}</span>
+                </div>
+              )}
+
+              {/* Student Cards Grid */}
+              {isLoadingStudents ? (
+                <div className="p-12 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+                  <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+                  <span className="text-xs font-medium">
+                    {language === 'kk' ? 'Оқушылар тізімі жүктелуде...' : 'Загрузка списка учеников...'}
+                  </span>
+                </div>
+              ) : studentList.length === 0 ? (
+                <div className="p-10 rounded-2xl bg-slate-950/40 border border-slate-800 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-slate-800/80 mx-auto flex items-center justify-center text-slate-500">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-300">{t.noStudentsYet}</p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddStudentOpen(true)}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow transition-colors"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>{t.createStudentBtn}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {studentList.map(st => (
+                    <div
+                      key={st.student_id}
+                      className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 hover:border-emerald-500/40 transition-all flex flex-col justify-between gap-3 shadow-md"
+                    >
+                      <div className="space-y-2">
+                        {/* Top: Name & Code */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-extrabold text-white leading-tight">
+                              {st.display_name}
+                            </h4>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[11px] font-mono text-emerald-400 font-bold">
+                                {st.student_code}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Security Status Badge */}
+                          {st.is_locked ? (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800 text-[10px] font-bold">
+                              <ShieldAlert className="w-3 h-3 text-rose-400" />
+                              <span>{language === 'kk' ? 'Бұғатталған' : 'Заблокирован'}</span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold">
+                              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                              <span>{language === 'kk' ? 'Белсенді' : 'Активен'}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Stats Row */}
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80 text-xs">
+                          <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">{t.studentPoints}</span>
+                            <span className="text-sm font-extrabold text-amber-300">
+                              {st.points || 0}
+                            </span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
+                            <span className="text-[10px] text-slate-400 block">{t.studentLevels}</span>
+                            <span className="text-sm font-extrabold text-emerald-300">
+                              {st.completed_levels_count || 0}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Activity */}
+                        {st.last_active_at && (
+                          <p className="text-[10px] text-slate-500">
+                            {t.studentLastActive}: {new Date(st.last_active_at).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setStudentActionError('');
+                            setStudentActionSuccess('');
+                            setResetPinModalStudent(st);
+                            setResetNewPin('');
+                          }}
+                          className="flex-1 py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{t.resetPinBtn}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStudentClick(st)}
+                          className="p-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/40 text-xs font-semibold cursor-pointer transition-colors"
+                          title={t.deleteStudentBtn}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1814,6 +2292,166 @@ CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL US
                 <button
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                >
+                  {t.saveBtn}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD STUDENT MODAL */}
+      {isAddStudentOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-md bg-slate-900 border border-emerald-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-white">{t.createStudentBtn}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddStudentOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateStudentSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  {t.studentCode} (Логин коды / Код для входа)
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. HERO-01, ASKAR-26"
+                  value={newStudentCode}
+                  onChange={e => setNewStudentCode(e.target.value.toUpperCase())}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-mono font-bold text-emerald-300 placeholder-slate-500 uppercase tracking-wider"
+                />
+                <p className="text-[10px] text-slate-500">
+                  {language === 'kk'
+                    ? 'Оқушы осы код арқылы ойынға кіреді (бірегей болуы тиіс).'
+                    : 'Ученик будет использовать этот код для входа (должен быть уникальным).'}
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  {t.studentName} (Аты-жөні / ФИО)
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Алихан Сәрсен"
+                  value={newStudentName}
+                  onChange={e => setNewStudentName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs font-medium text-white placeholder-slate-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  {t.studentPinLabel} (4 таңбалы PIN)
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  required
+                  placeholder="••••"
+                  value={newStudentPin}
+                  onChange={e => setNewStudentPin(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tracking-widest text-amber-300 placeholder-slate-500 text-center"
+                />
+                <p className="text-[10px] text-slate-500">
+                  {language === 'kk'
+                    ? 'Бұл PIN базада шифрланып (hash) сақталады.'
+                    : 'PIN надёжно хешируется в базе данных и никогда не хранится открыто.'}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddStudentOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:bg-slate-800"
+                >
+                  {t.cancelBtn}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newStudentCode.trim() || !newStudentName.trim() || newStudentPin.length < 4}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs shadow cursor-pointer transition-colors"
+                >
+                  {t.saveBtn}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* RESET PIN MODAL */}
+      {resetPinModalStudent && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-white">{t.resetPinBtn}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetPinModalStudent(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+              <span className="text-slate-400 block">{t.studentName}:</span>
+              <span className="font-bold text-white">{resetPinModalStudent.display_name}</span>
+              <span className="text-xs text-emerald-400 font-mono ml-2">({resetPinModalStudent.student_code})</span>
+            </div>
+
+            <form onSubmit={handleResetPinSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  {t.newPinPrompt}
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  required
+                  autoFocus
+                  placeholder="••••"
+                  value={resetNewPin}
+                  onChange={e => setResetNewPin(e.target.value.replace(/\D/g, ''))}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tracking-widest text-amber-300 placeholder-slate-500 text-center"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setResetPinModalStudent(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:bg-slate-800"
+                >
+                  {t.cancelBtn}
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetNewPin.length < 4}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white font-bold text-xs shadow cursor-pointer transition-colors"
                 >
                   {t.saveBtn}
                 </button>

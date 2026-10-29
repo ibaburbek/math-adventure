@@ -4,7 +4,14 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Level, StudentProgress, ReviewSubmission, ReviewStatus } from '../types/game';
+import {
+  Level,
+  StudentProgress,
+  ReviewSubmission,
+  ReviewStatus,
+  StudentAccount,
+  LoginResult
+} from '../types/game';
 
 // Check environment variables first, then fallback to teacher runtime settings if stored
 const ENV_URL = import.meta.env.VITE_SUPABASE_URL || '';
@@ -401,5 +408,235 @@ export async function updateReviewStatusInCloud(
   } catch (err) {
     console.error('Failed to update review status in cloud:', err);
     return false;
+  }
+}
+
+/**
+ * Authenticate student via secure server-side RPC with PIN verification and rate-limiting
+ */
+export async function studentLogin(identifier: string, pin: string): Promise<LoginResult> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      code: 'SERVER_ERROR',
+      message: 'Supabase cloud client is not configured. Please check VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.'
+    };
+  }
+
+  const cleanId = identifier.trim();
+  const cleanPin = pin.trim();
+
+  if (!cleanId) {
+    return {
+      success: false,
+      code: 'STUDENT_NOT_FOUND',
+      message: 'Please enter your student code or name.'
+    };
+  }
+
+  if (!cleanPin) {
+    return {
+      success: false,
+      code: 'INVALID_PIN',
+      message: 'Please enter your 4-digit PIN.'
+    };
+  }
+
+  try {
+    const { data, error } = await client.rpc('student_login', {
+      p_identifier: cleanId,
+      p_pin: cleanPin
+    });
+
+    if (error) {
+      // RPC might not exist if migration hasn't been run yet
+      if (error.code === '42883' || error.message?.includes('function public.student_login') || error.message?.includes('does not exist')) {
+        return {
+          success: false,
+          code: 'SERVER_ERROR',
+          message: 'Student login database function not installed. Please run the SQL migration in Supabase SQL Editor.'
+        };
+      }
+      return {
+        success: false,
+        code: 'SERVER_ERROR',
+        message: error.message || 'Login failed.'
+      };
+    }
+
+    if (!data) {
+      return {
+        success: false,
+        code: 'SERVER_ERROR',
+        message: 'No response from authentication server.'
+      };
+    }
+
+    return {
+      success: Boolean(data.success),
+      code: data.code,
+      message: data.message,
+      student: data.student,
+      progress: data.progress,
+      remainingAttempts: data.remaining_attempts,
+      lockedUntil: data.locked_until
+    };
+  } catch (err: any) {
+    console.error('Student login error:', err);
+    return {
+      success: false,
+      code: 'SERVER_ERROR',
+      message: err.message || 'An unexpected error occurred during login.'
+    };
+  }
+}
+
+/**
+ * Fetch all students for Teacher Studio
+ */
+export async function teacherGetStudents(): Promise<StudentAccount[] | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client.rpc('teacher_get_students');
+    if (error) {
+      console.warn('teacher_get_students RPC error:', error);
+      // Fallback: direct select if RPC not installed
+      const { data: directData, error: directErr } = await client
+        .from('math_students')
+        .select(`
+          student_id,
+          student_code,
+          display_name,
+          selected_character_id,
+          last_active_at,
+          failed_attempts
+        `)
+        .order('display_name', { ascending: true });
+
+      if (directErr || !directData) return null;
+      return directData.map((d: any) => ({
+        student_id: d.student_id,
+        student_code: d.student_code || d.student_id,
+        display_name: d.display_name,
+        selected_character_id: d.selected_character_id,
+        failed_attempts: d.failed_attempts || 0,
+        is_locked: false
+      }));
+    }
+
+    return (data || []).map((row: any) => ({
+      student_id: row.student_id,
+      student_code: row.student_code,
+      display_name: row.display_name,
+      selected_character_id: row.selected_character_id,
+      points: row.points,
+      completed_levels_count: row.completed_levels_count,
+      completed_questions_count: row.completed_questions_count,
+      last_active_at: row.last_active_at,
+      last_login_at: row.last_login_at,
+      failed_attempts: row.failed_attempts,
+      is_locked: Boolean(row.is_locked)
+    }));
+  } catch (err) {
+    console.error('Failed to get students for teacher:', err);
+    return null;
+  }
+}
+
+/**
+ * Teacher creates a new student with unique code, name, and hashed PIN
+ */
+export async function teacherCreateStudent(
+  studentCode: string,
+  displayName: string,
+  pin: string,
+  initialCharacter?: string
+): Promise<{ success: boolean; message?: string; student?: StudentAccount }> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return { success: false, message: 'Supabase client not configured.' };
+  }
+
+  try {
+    const { data, error } = await client.rpc('teacher_create_student', {
+      p_student_code: studentCode.trim(),
+      p_display_name: displayName.trim(),
+      p_pin: pin.trim(),
+      p_initial_character: initialCharacter || 'alen'
+    });
+
+    if (error) {
+      return { success: false, message: error.message };
+    }
+
+    if (data && !data.success) {
+      return { success: false, message: data.message };
+    }
+
+    return {
+      success: true,
+      message: 'Student account created successfully!',
+      student: data?.student
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Failed to create student.' };
+  }
+}
+
+/**
+ * Teacher resets student's PIN
+ */
+export async function teacherResetStudentPin(
+  studentId: string,
+  newPin: string
+): Promise<{ success: boolean; message?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, message: 'Supabase client not configured.' };
+
+  try {
+    const { data, error } = await client.rpc('teacher_reset_student_pin', {
+      p_student_id: studentId,
+      p_new_pin: newPin.trim()
+    });
+
+    if (error) return { success: false, message: error.message };
+    if (data && !data.success) return { success: false, message: data.message };
+
+    return { success: true, message: data?.message || 'PIN reset successfully!' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Failed to reset PIN.' };
+  }
+}
+
+/**
+ * Teacher deletes a student
+ */
+export async function teacherDeleteStudent(
+  studentId: string
+): Promise<{ success: boolean; message?: string }> {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, message: 'Supabase client not configured.' };
+
+  try {
+    const { data, error } = await client.rpc('teacher_delete_student', {
+      p_student_id: studentId
+    });
+
+    if (error) {
+      // Fallback direct delete
+      const { error: delErr } = await client
+        .from('math_students')
+        .delete()
+        .eq('student_id', studentId);
+      if (delErr) return { success: false, message: delErr.message };
+      return { success: true };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Failed to delete student.' };
   }
 }

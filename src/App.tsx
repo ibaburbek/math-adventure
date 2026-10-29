@@ -12,7 +12,8 @@ import {
   ShopItem,
   Character,
   ReviewSubmission,
-  CloudSyncStatus
+  CloudSyncStatus,
+  LoginResult
 } from './types/game';
 import {
   isSupabaseConfigured,
@@ -37,7 +38,8 @@ import { CharacterSelectModal } from './components/CharacterSelectModal';
 import { LevelCompleteModal } from './components/LevelCompleteModal';
 import { ProgressView } from './components/ProgressView';
 import { TeacherPanel } from './components/TeacherPanel';
-import { ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { StudentLoginModal } from './components/StudentLoginModal';
+import { ChevronLeft, ChevronRight, Sparkles, AlertTriangle, X } from 'lucide-react';
 
 const STORAGE_KEY = 'math_adventure_game_state_v1';
 
@@ -79,12 +81,29 @@ export default function App() {
     }
   }, [state]);
 
+  // Active Student Session & Guest Mode State
+  const [activeStudent, setActiveStudent] = useState<{
+    student_id: string;
+    student_code: string;
+    display_name: string;
+  } | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('math_adventure_active_student_session_v1');
+        if (saved) return JSON.parse(saved);
+      } catch {}
+    }
+    return null;
+  });
+  const [isGuestMode, setIsGuestMode] = useState(false);
+  const [dismissDevNotice, setDismissDevNotice] = useState(false);
+
   // UI Navigation & Modal states
   const [currentTab, setCurrentTab] = useState<'map' | 'character' | 'shop' | 'progress'>('map');
   const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
   const [isChestModalOpen, setIsChestModalOpen] = useState(false);
   const [isTeacherPanelOpen, setIsTeacherPanelOpen] = useState(false);
-  const [teacherInitialTab, setTeacherInitialTab] = useState<'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud'>('levels');
+  const [teacherInitialTab, setTeacherInitialTab] = useState<'levels' | 'reviews' | 'analytics' | 'backup' | 'cloud' | 'students'>('levels');
 
   // Supabase Cloud Sync State
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>({
@@ -93,7 +112,7 @@ export default function App() {
     syncing: false
   });
 
-  // On Mount: Initial check and sync from/to Supabase
+  // On Mount or Student Change: Sync from/to Supabase
   useEffect(() => {
     if (!isSupabaseConfigured()) {
       setCloudStatus({ configured: false, connected: false, syncing: false });
@@ -102,24 +121,28 @@ export default function App() {
 
     setCloudStatus(prev => ({ ...prev, configured: true, syncing: true }));
 
-    const studentId = state.progress.studentId || 'default_student';
+    const targetStudentId = activeStudent?.student_id || state.progress.studentId;
 
-    // Attempt to pull student progress from cloud or register student
-    fetchStudentProgressFromCloud(studentId)
+    if (!targetStudentId) {
+      setCloudStatus({ configured: true, connected: true, syncing: false });
+      return;
+    }
+
+    // Pull student progress from cloud
+    fetchStudentProgressFromCloud(targetStudentId)
       .then(cloudData => {
         if (cloudData) {
-          // Cloud has existing record; if cloud points are higher or equal, sync into local state
-          if (typeof cloudData.points === 'number' && cloudData.points >= state.progress.points) {
-            setState(prev => ({
-              ...prev,
-              progress: {
-                ...prev.progress,
-                ...cloudData,
-                studentId: prev.progress.studentId,
-                studentName: prev.progress.studentName
-              }
-            }));
-          }
+          // Cloud has existing record; sync into local state
+          setState(prev => ({
+            ...prev,
+            progress: {
+              ...prev.progress,
+              ...cloudData,
+              studentId: targetStudentId,
+              studentCode: activeStudent?.student_code || prev.progress.studentCode,
+              studentName: activeStudent?.display_name || prev.progress.studentName
+            }
+          }));
           setCloudStatus({
             configured: true,
             connected: true,
@@ -127,14 +150,10 @@ export default function App() {
             lastSyncedAt: Date.now()
           });
         } else {
-          // New student, push local progress to cloud
-          syncStudentProgressToCloud(state.progress).then(success => {
-            setCloudStatus({
-              configured: true,
-              connected: success,
-              syncing: false,
-              lastSyncedAt: success ? Date.now() : undefined
-            });
+          setCloudStatus({
+            configured: true,
+            connected: true,
+            syncing: false
           });
         }
       })
@@ -146,7 +165,57 @@ export default function App() {
           error: String(err)
         });
       });
-  }, []);
+  }, [activeStudent?.student_id]);
+
+  // Handle successful student login
+  const handleStudentLoginSuccess = (loginResult: LoginResult) => {
+    if (loginResult.student) {
+      const studentSession = {
+        student_id: loginResult.student.student_id,
+        student_code: loginResult.student.student_code,
+        display_name: loginResult.student.display_name
+      };
+      setActiveStudent(studentSession);
+      try {
+        localStorage.setItem('math_adventure_active_student_session_v1', JSON.stringify(studentSession));
+      } catch {}
+    }
+
+    if (loginResult.progress) {
+      setState(prev => ({
+        ...prev,
+        progress: {
+          ...prev.progress,
+          ...loginResult.progress,
+          studentId: loginResult.student?.student_id,
+          studentCode: loginResult.student?.student_code,
+          studentName: loginResult.student?.display_name,
+          hasFinishedFirstSetup: loginResult.progress?.hasFinishedFirstSetup ?? true
+        }
+      }));
+    }
+
+    setIsGuestMode(false);
+  };
+
+  // Handle Student Logout
+  const handleLogout = () => {
+    soundManager.playClick(state.soundEnabled);
+    if (window.confirm(t.logoutConfirm)) {
+      try {
+        localStorage.removeItem('math_adventure_active_student_session_v1');
+      } catch {}
+      setActiveStudent(null);
+      setIsGuestMode(false);
+      setState(prev => ({
+        ...prev,
+        progress: {
+          ...INITIAL_PROGRESS,
+          hasFinishedFirstSetup: false
+        }
+      }));
+    }
+  };
 
   // Background auto-sync to Supabase when progress changes
   useEffect(() => {
@@ -437,12 +506,17 @@ export default function App() {
         points={state.progress.points}
         currentLevelTitle={currentLevel ? currentLevel.title[state.language] : ''}
         cloudStatus={cloudStatus}
+        studentName={activeStudent?.display_name || (isGuestMode ? undefined : state.progress.studentName)}
+        studentCode={activeStudent?.student_code || state.progress.studentCode}
+        onLogout={activeStudent ? handleLogout : undefined}
         onToggleSound={handleToggleSound}
         onToggleLanguage={handleToggleLanguage}
         onOpenTeacherPanel={(initialTab) => {
           soundManager.playClick(state.soundEnabled);
           if (initialTab === 'cloud') {
             setTeacherInitialTab('cloud');
+          } else if (initialTab === 'students') {
+            setTeacherInitialTab('students');
           } else {
             setTeacherInitialTab('levels');
           }
@@ -452,6 +526,26 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-6">
+        {/* Developer Notice: Unconfigured Supabase */}
+        {!isSupabaseConfigured() && !dismissDevNotice && (
+          <div className="p-4 rounded-2xl bg-amber-950/60 border border-amber-500/40 text-amber-200 flex items-start justify-between gap-3 text-xs shadow-md">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-extrabold">{t.devConfigTitle}</p>
+                <p className="mt-1 text-amber-300/80 leading-relaxed">{t.devConfigDesc}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissDevNotice(true)}
+              className="p-1 rounded-lg hover:bg-amber-900/50 text-amber-300 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* VIEW: MAP */}
         {currentTab === 'map' && (
           <div className="space-y-4">
@@ -624,6 +718,17 @@ export default function App() {
           onUpdateState={setState}
           onResetProgress={handleResetProgress}
           onResetAllDefault={handleResetAllDefault}
+        />
+      )}
+
+      {/* MODAL: Student Login Screen */}
+      {isSupabaseConfigured() && !activeStudent && !isGuestMode && (
+        <StudentLoginModal
+          language={state.language}
+          soundEnabled={state.soundEnabled}
+          onSuccess={handleStudentLoginSuccess}
+          onPlayGuest={() => setIsGuestMode(true)}
+          onToggleLanguage={handleToggleLanguage}
         />
       )}
     </div>

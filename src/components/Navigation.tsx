@@ -21,7 +21,9 @@ import {
   Cloud,
   CloudCheck,
   CloudAlert,
-  Loader2
+  Loader2,
+  User,
+  LogOut
 } from 'lucide-react';
 import { CloudSyncStatus } from '../types/game';
 
@@ -31,9 +33,12 @@ interface TopNavProps {
   points: number;
   currentLevelTitle: string;
   cloudStatus?: CloudSyncStatus;
+  studentName?: string;
+  studentCode?: string;
+  onLogout?: () => void;
   onToggleSound: () => void;
   onToggleLanguage: () => void;
-  onOpenTeacherPanel: (initialTab?: 'levels' | 'reviews' | 'analytics' | 'cloud' | 'data') => void;
+  onOpenTeacherPanel: (initialTab?: 'levels' | 'reviews' | 'analytics' | 'cloud' | 'data' | 'students') => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -42,6 +47,9 @@ export const TopNav: React.FC<TopNavProps> = ({
   points,
   currentLevelTitle,
   cloudStatus,
+  studentName,
+  studentCode,
+  onLogout,
   onToggleSound,
   onToggleLanguage,
   onOpenTeacherPanel
@@ -121,6 +129,29 @@ export const TopNav: React.FC<TopNavProps> = ({
                 {language === 'kk' ? 'Жергілікті' : 'Локал'}
               </span>
             </button>
+          )}
+
+          {/* Student Profile & Logout Badge */}
+          {studentName && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-teal-950/60 border border-teal-500/40 text-teal-300 text-xs">
+              <User className="w-3.5 h-3.5 text-teal-400" />
+              <span className="font-bold max-w-[120px] truncate">{studentName}</span>
+              {studentCode && (
+                <span className="text-[10px] text-teal-400/80 font-mono hidden md:inline">
+                  ({studentCode})
+                </span>
+              )}
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  title={t.logoutBtn}
+                  className="p-1 rounded-md hover:bg-teal-900/80 text-teal-300 hover:text-white transition-colors cursor-pointer ml-0.5"
+                >
+                  <LogOut className="w-3 h-3" />
+                </button>
+              )}
+            </div>
           )}
 
           {/* Live Points Counter */}
