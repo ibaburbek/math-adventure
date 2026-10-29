@@ -14,11 +14,11 @@ import {
 } from '../types/game';
 
 // Check environment variables first, then fallback to teacher runtime settings if stored
-const ENV_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const ENV_URL = import.meta.env.VITE_SUPABASE_URL || 'https://qdxllnszugxjofonhuqf.supabase.co';
 const ENV_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
-  '';
+  'sb_publishable_yMdtPlwC-RSSL_Va_CdrEw_1BtAVK6t';
 
 let activeClient: SupabaseClient | null = null;
 let activeUrl = ENV_URL;
