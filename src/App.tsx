@@ -39,7 +39,7 @@ import { LevelCompleteModal } from './components/LevelCompleteModal';
 import { ProgressView } from './components/ProgressView';
 import { TeacherPanel } from './components/TeacherPanel';
 import { StudentLoginModal } from './components/StudentLoginModal';
-import { ChevronLeft, ChevronRight, Sparkles, AlertTriangle, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Sparkles, AlertTriangle, X, Cloud } from 'lucide-react';
 
 const STORAGE_KEY = 'math_adventure_game_state_v1';
 
@@ -534,6 +534,19 @@ export default function App() {
               <div>
                 <p className="font-extrabold">{t.devConfigTitle}</p>
                 <p className="mt-1 text-amber-300/80 leading-relaxed">{t.devConfigDesc}</p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTeacherInitialTab('cloud');
+                      setIsTeacherPanelOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer shadow transition-all"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>{state.language === 'kk' ? 'Мұғалім кабинетінде сақтау' : 'Ввести в кабинете учителя'}</span>
+                  </button>
+                </div>
               </div>
             </div>
             <button
