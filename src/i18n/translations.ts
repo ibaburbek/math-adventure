@@ -222,7 +222,21 @@ export const translations = {
     newPinPrompt: 'Жаңа 4 таңбалы PIN енгізіңіз:',
     studentCreatedSuccess: 'Оқушы сәтті тіркелді!',
     devConfigTitle: 'Supabase баптауы қажет (Әзірлеушіге ескерту)',
-    devConfigDesc: 'Бұлтты сақтау үшін .env.local файлына немесе Vercel баптауына VITE_SUPABASE_URL және VITE_SUPABASE_PUBLISHABLE_KEY енгізіңіз.'
+    devConfigDesc: 'Бұлтты сақтау үшін .env.local файлына немесе Vercel баптауына VITE_SUPABASE_URL және VITE_SUPABASE_PUBLISHABLE_KEY енгізіңіз.',
+    cloudConnecting: 'Supabase бұлтына қосылуда...',
+    cloudLoadingData: 'Тапсырмалар мен деңгейлер жүктелуде...',
+    cloudErrorTitle: 'Бұлтты базаға қосылу мүмкін болмады',
+    cloudErrorDesc: 'Math Adventure ойыны тек Supabase бұлтымен жұмыс істейді. Жергілікті demo-режим өшірілген. Интернет байланысын немесе сервер баптауларын тексеріңіз.',
+    retryConnectionBtn: 'Қайта қосылу',
+    cloudSaveSuccess: 'Бұлтта сақталды',
+    cloudSaving: 'Бұлтқа сақталуда...',
+    cloudSaveError: 'Бұлтқа сақтау қатесі',
+    migrateLocalTitle: 'Бұрынғы жергілікті деректер',
+    migrateLocalDesc: 'Браузерде сақталған ескі ойын деректерін Supabase бұлтына көшіру.',
+    migrateLocalBtn: 'Бұлтқа көшіру (Migrate)',
+    migrateLocalSuccess: 'Жергілікті деректер бұлтқа сәтті көшірілді!',
+    noLegacyData: 'Көшіретін жергілікті деректер табылмады.',
+    databaseOffline: 'Деректер базасы қолжетімсіз. Қайта қосылып көріңіз.'
   },
   ru: {
     appTitle: 'Math Adventure',
@@ -440,6 +454,20 @@ export const translations = {
     newPinPrompt: 'Введите новый 4-значный PIN:',
     studentCreatedSuccess: 'Ученик успешно зарегистрирован!',
     devConfigTitle: 'Требуется настройка Supabase (Уведомление разработчику)',
-    devConfigDesc: 'Для облачной синхронизации укажите VITE_SUPABASE_URL и VITE_SUPABASE_PUBLISHABLE_KEY в файле .env.local или в панели Vercel.'
+    devConfigDesc: 'Для облачной синхронизации укажите VITE_SUPABASE_URL и VITE_SUPABASE_PUBLISHABLE_KEY в файле .env.local или в панели Vercel.',
+    cloudConnecting: 'Подключение к облаку Supabase...',
+    cloudLoadingData: 'Загрузка уровней и заданий из облака...',
+    cloudErrorTitle: 'Не удалось подключиться к базе данных',
+    cloudErrorDesc: 'Math Adventure работает исключительно через облачную базу данных Supabase. Локальный демо-режим отключён. Проверьте интернет или настройки сервера.',
+    retryConnectionBtn: 'Повторить попытку',
+    cloudSaveSuccess: 'Сохранено в облаке',
+    cloudSaving: 'Сохранение в облаке...',
+    cloudSaveError: 'Ошибка сохранения',
+    migrateLocalTitle: 'Локальные данные браузера',
+    migrateLocalDesc: 'Перенести ранее сохраненные в браузере уровни и задания в облачную базу Supabase.',
+    migrateLocalBtn: 'Перенести в облако (Migrate)',
+    migrateLocalSuccess: 'Локальные данные успешно перенесены в Supabase!',
+    noLegacyData: 'Локальные данные для переноса не найдены.',
+    databaseOffline: 'База данных недоступна. Попробуйте повторить попытку.'
   }
 };

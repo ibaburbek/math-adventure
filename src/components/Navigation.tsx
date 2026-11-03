@@ -83,53 +83,39 @@ export const TopNav: React.FC<TopNavProps> = ({
         {/* Action Controls */}
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           {/* Cloud Sync Status Badge */}
-          {cloudStatus?.configured ? (
-            <button
-              type="button"
-              onClick={() => onOpenTeacherPanel('cloud')}
-              title={
-                cloudStatus.syncing
-                  ? t.cloudSyncing
-                  : cloudStatus.error
-                  ? `${t.cloudSyncError}: ${cloudStatus.error}`
-                  : t.cloudConnected
-              }
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
-                cloudStatus.syncing
-                  ? 'bg-sky-950/60 border-sky-500/40 text-sky-300'
-                  : cloudStatus.error
-                  ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
-                  : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/10'
-              }`}
-            >
-              {cloudStatus.syncing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-              ) : cloudStatus.error ? (
-                <CloudAlert className="w-3.5 h-3.5 text-rose-400" />
-              ) : (
-                <CloudCheck className="w-3.5 h-3.5 text-emerald-400" />
-              )}
-              <span className="hidden sm:inline">
-                {cloudStatus.syncing
-                  ? language === 'kk' ? 'Синх...' : 'Синх...'
-                  : cloudStatus.error
-                  ? language === 'kk' ? 'Бұлт!' : 'Облако!'
-                  : language === 'kk' ? 'Бұлт' : 'Облако'}
-              </span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => onOpenTeacherPanel('cloud')}
-              title={t.cloudUnconfigured}
-              className="flex items-center gap-1 px-2 py-1.5 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-800 text-slate-400 text-xs font-medium transition-colors cursor-pointer"
-            >
-              <Cloud className="w-3.5 h-3.5 opacity-60" />
-              <span className="hidden md:inline text-[11px] opacity-75">
-                {language === 'kk' ? 'Жергілікті' : 'Локал'}
-              </span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => onOpenTeacherPanel('cloud')}
+            title={
+              cloudStatus?.syncing
+                ? t.cloudSyncing
+                : cloudStatus?.error
+                ? `${t.cloudSyncError}: ${cloudStatus.error}`
+                : t.cloudConnected
+            }
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+              cloudStatus?.syncing
+                ? 'bg-sky-950/60 border-sky-500/40 text-sky-300'
+                : cloudStatus?.error
+                ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                : 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/10'
+            }`}
+          >
+            {cloudStatus?.syncing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+            ) : cloudStatus?.error ? (
+              <CloudAlert className="w-3.5 h-3.5 text-rose-400" />
+            ) : (
+              <CloudCheck className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span className="hidden sm:inline">
+              {cloudStatus?.syncing
+                ? language === 'kk' ? 'Сақталуда...' : 'Сохранение...'
+                : cloudStatus?.error
+                ? language === 'kk' ? 'Байланыс қатесі' : 'Ошибка связи'
+                : language === 'kk' ? 'Supabase' : 'Supabase'}
+            </span>
+          </button>
 
           {/* Student Profile & Logout Badge */}
           {studentName && (

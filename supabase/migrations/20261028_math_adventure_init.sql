@@ -112,6 +112,15 @@ CREATE TABLE IF NOT EXISTS public.math_review_submissions (
     reviewed_at TIMESTAMPTZ
 );
 
+-- 6. Teacher Settings Table
+CREATE TABLE IF NOT EXISTS public.math_teacher_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    pin_plain TEXT DEFAULT '1234',
+    pin_created BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_math_levels_order ON public.math_levels(level_order ASC);
 CREATE INDEX IF NOT EXISTS idx_math_questions_level_order ON public.math_questions(level_id, question_order ASC);
@@ -127,6 +136,7 @@ ALTER TABLE public.math_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_student_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_review_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.math_teacher_settings ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public read levels" ON public.math_levels;
 DROP POLICY IF EXISTS "Public upsert levels" ON public.math_levels;
@@ -139,6 +149,8 @@ DROP POLICY IF EXISTS "Public upsert progress" ON public.math_student_progress;
 DROP POLICY IF EXISTS "Public read reviews" ON public.math_review_submissions;
 DROP POLICY IF EXISTS "Public submit reviews" ON public.math_review_submissions;
 DROP POLICY IF EXISTS "Public update reviews" ON public.math_review_submissions;
+DROP POLICY IF EXISTS "Public read teacher settings" ON public.math_teacher_settings;
+DROP POLICY IF EXISTS "Public upsert teacher settings" ON public.math_teacher_settings;
 
 CREATE POLICY "Public read levels" ON public.math_levels FOR SELECT TO anon, authenticated USING (true);
 CREATE POLICY "Public upsert levels" ON public.math_levels FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
@@ -151,6 +163,8 @@ CREATE POLICY "Public upsert progress" ON public.math_student_progress FOR ALL T
 CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR SELECT TO anon, authenticated USING (true);
 CREATE POLICY "Public submit reviews" ON public.math_review_submissions FOR INSERT TO anon, authenticated WITH CHECK (true);
 CREATE POLICY "Public update reviews" ON public.math_review_submissions FOR UPDATE TO anon, authenticated USING (true) WITH CHECK (true);
+CREATE POLICY "Public read teacher settings" ON public.math_teacher_settings FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public upsert teacher settings" ON public.math_teacher_settings FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
 
 -- ==============================================================================
 -- SECURE SERVER-SIDE RPC FUNCTIONS

@@ -27,12 +27,15 @@ import {
   fetchTeacherReviewQueueFromCloud,
   updateReviewStatusInCloud,
   getSupabaseConfig,
-  updateSupabaseConfig,
   isSupabaseConfigured,
   teacherGetStudents,
   teacherCreateStudent,
   teacherResetStudentPin,
-  teacherDeleteStudent
+  teacherDeleteStudent,
+  deleteLevelFromCloud,
+  deleteQuestionFromCloud,
+  saveTeacherSettingsToCloud,
+  fetchTeacherSettingsFromCloud
 } from '../lib/supabase';
 import { StudentAccount } from '../types/game';
 import {
@@ -127,8 +130,7 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
   const [reviewFeedbackInput, setReviewFeedbackInput] = useState<Record<string, string>>({});
 
   // Supabase Cloud State
-  const [supabaseUrlInput, setSupabaseUrlInput] = useState(getSupabaseConfig().url);
-  const [supabaseKeyInput, setSupabaseKeyInput] = useState(getSupabaseConfig().key);
+  const cloudConfig = getSupabaseConfig();
   const [isTestingCloud, setIsTestingCloud] = useState(false);
   const [cloudMessage, setCloudMessage] = useState<{ type: 'success' | 'error' | null; text: string }>({
     type: null,
@@ -136,6 +138,15 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
   });
   const [isSyncing, setIsSyncing] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+
+  // Legacy localStorage detection & migration state
+  const [hasLegacyLocalData, setHasLegacyLocalData] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return Boolean(localStorage.getItem('math_adventure_game_state_v1'));
+    }
+    return false;
+  });
+  const [isMigratingLegacy, setIsMigratingLegacy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const questionImageInputRef = useRef<HTMLInputElement>(null);
@@ -239,13 +250,11 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
     setEditingLevel(null);
   };
 
-  const handleDeleteLevel = (levelId: string) => {
+  const handleDeleteLevel = async (levelId: string) => {
     if (!window.confirm(t.deleteConfirm)) return;
+    await deleteLevelFromCloud(levelId);
     onUpdateState(prev => {
       const filtered = prev.levels.filter(l => l.id !== levelId);
-      if (isSupabaseConfigured()) {
-        syncLevelsToCloud(filtered);
-      }
       return { ...prev, levels: filtered };
     });
     if (selectedLevelId === levelId && levels.length > 1) {
@@ -313,8 +322,9 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
     setEditingQuestion(null);
   };
 
-  const handleDeleteQuestion = (questionId: string) => {
+  const handleDeleteQuestion = async (questionId: string) => {
     if (!window.confirm(t.deleteQuestionConfirm)) return;
+    await deleteQuestionFromCloud(questionId);
     onUpdateState(prev => {
       const updatedLevels = prev.levels.map(lvl => {
         if (lvl.id !== currentLevel.id) return lvl;
@@ -323,9 +333,6 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
           questions: lvl.questions.filter(q => q.id !== questionId)
         };
       });
-      if (isSupabaseConfigured()) {
-        syncLevelsToCloud(updatedLevels);
-      }
       return { ...prev, levels: updatedLevels };
     });
   };
@@ -473,19 +480,49 @@ export const TeacherPanel: React.FC<TeacherPanelProps> = ({
     reader.readAsText(file);
   };
 
-  // SUPABASE CLOUD SYNC ACTIONS
-  const handleSaveCloudCredentials = () => {
-    updateSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
-    setCloudMessage({
-      type: 'success',
-      text: 'Supabase credentials saved locally!'
-    });
+  // SUPABASE CLOUD ACTIONS & LEGACY MIGRATION
+  const handleMigrateLegacyLocalData = async () => {
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem('math_adventure_game_state_v1');
+    if (!raw) {
+      alert(t.noLegacyData);
+      return;
+    }
+
+    setIsMigratingLegacy(true);
+    setCloudMessage({ type: null, text: '' });
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.levels && Array.isArray(parsed.levels)) {
+        await syncLevelsToCloud(parsed.levels);
+      }
+      if (parsed.progress && parsed.progress.studentId) {
+        await syncStudentProgressToCloud(parsed.progress);
+      }
+
+      // Safe clean-up of legacy local data after successful upload
+      localStorage.removeItem('math_adventure_game_state_v1');
+      setHasLegacyLocalData(false);
+      setIsMigratingLegacy(false);
+      soundManager.playCorrect(soundEnabled);
+      setCloudMessage({
+        type: 'success',
+        text: t.migrateLocalSuccess
+      });
+    } catch (err: any) {
+      setIsMigratingLegacy(false);
+      soundManager.playWrong(soundEnabled);
+      setCloudMessage({
+        type: 'error',
+        text: `Migration failed: ${err.message || 'Unknown error'}`
+      });
+    }
   };
 
   const handleTestCloudConnection = async () => {
     setIsTestingCloud(true);
     setCloudMessage({ type: null, text: '' });
-    updateSupabaseConfig(supabaseUrlInput, supabaseKeyInput);
 
     const result = await testSupabaseConnection();
     setIsTestingCloud(false);
@@ -741,11 +778,21 @@ CREATE TABLE IF NOT EXISTS public.math_review_submissions (
     reviewed_at TIMESTAMPTZ
 );
 
+-- 6. Teacher Settings
+CREATE TABLE IF NOT EXISTS public.math_teacher_settings (
+    id TEXT PRIMARY KEY DEFAULT 'default',
+    pin_plain TEXT DEFAULT '1234',
+    pin_created BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE public.math_levels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_student_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.math_review_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.math_teacher_settings ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Public read levels" ON public.math_levels FOR SELECT USING (true);
 CREATE POLICY "Public upsert levels" ON public.math_levels FOR ALL USING (true);
@@ -754,6 +801,7 @@ CREATE POLICY "Public upsert questions" ON public.math_questions FOR ALL USING (
 CREATE POLICY "Public read students" ON public.math_students FOR SELECT USING (true);
 CREATE POLICY "Public read progress" ON public.math_student_progress FOR ALL USING (true);
 CREATE POLICY "Public read reviews" ON public.math_review_submissions FOR ALL USING (true);
+CREATE POLICY "Public read teacher settings" ON public.math_teacher_settings FOR ALL USING (true);
 
 -- SECURE RPC: Student Login with server-side PIN verification & rate-limiting
 CREATE OR REPLACE FUNCTION public.student_login(p_identifier TEXT, p_pin TEXT)
@@ -1751,51 +1799,86 @@ NOTIFY pgrst, 'reload schema';`;
                 </div>
               )}
 
-              {/* Credentials Form */}
+              {/* Cloud Environment Details Card */}
               <div className="p-5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-4">
-                <h4 className="text-sm font-bold text-slate-100">
-                  Supabase Credentials (VITE_SUPABASE_URL & VITE_SUPABASE_PUBLISHABLE_KEY)
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <Database className="w-4 h-4 text-emerald-400" />
+                    <span>Supabase Cloud Architecture (Production Only)</span>
+                  </h4>
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold">
+                    Connected via Environment Variables
+                  </span>
+                </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-400">Supabase Project URL</label>
-                    <input
-                      type="text"
-                      value={supabaseUrlInput}
-                      onChange={e => setSupabaseUrlInput(e.target.value)}
-                      placeholder="https://your-project.supabase.co"
-                      className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                    />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
+                      Supabase Project Endpoint
+                    </span>
+                    <span className="font-mono text-emerald-300 break-all">
+                      {cloudConfig.url || 'Not configured'}
+                    </span>
                   </div>
 
-                  <div>
-                    <label className="text-xs font-bold text-slate-400">
-                      Supabase Anon / Publishable Key
-                    </label>
-                    <input
-                      type="password"
-                      value={supabaseKeyInput}
-                      onChange={e => setSupabaseKeyInput(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                      className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                    />
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
+                    <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
+                      Public Publishable Key
+                    </span>
+                    <span className="font-mono text-slate-300">
+                      {cloudConfig.key
+                        ? `${cloudConfig.key.slice(0, 16)}••••••••${cloudConfig.key.slice(-4)}`
+                        : 'Missing key'}
+                    </span>
                   </div>
+                </div>
 
-                  <div className="flex items-center justify-between pt-2">
-                    <p className="text-[11px] text-slate-500">
-                      Saved safely in your browser session. Never exposes service-role keys.
-                    </p>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {language === 'kk'
+                    ? 'Қолданба тек Supabase бұлтымен жұмыс істейді. Жергілікті demo-режим толық өшірілген. Барлық деңгейлер, оқушылар аккаунттары мен бағалаулар бұлтта автоматты сақталады.'
+                    : 'Приложение работает исключительно с облачной базой данных Supabase. Локальный демо-режим полностью отключён. Все уровни, ученики и прогресс сохраняются в облаке.'}
+                </p>
+              </div>
+
+              {/* Legacy Local Storage Migration Card */}
+              {hasLegacyLocalData && (
+                <div className="p-5 rounded-2xl bg-amber-950/40 border border-amber-500/50 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
+                        <Upload className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-extrabold text-amber-200">
+                          {t.migrateLocalTitle}
+                        </h4>
+                        <p className="text-xs text-amber-300/80">
+                          {t.migrateLocalDesc}
+                        </p>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={handleSaveCloudCredentials}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow transition-colors"
+                      onClick={handleMigrateLegacyLocalData}
+                      disabled={isMigratingLegacy}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-2 cursor-pointer shadow transition-all shrink-0"
                     >
-                      Save Configuration
+                      {isMigratingLegacy ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Көшірілуде...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{t.migrateLocalBtn}</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Sync Controls */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

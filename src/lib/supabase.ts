@@ -10,36 +10,25 @@ import {
   ReviewSubmission,
   ReviewStatus,
   StudentAccount,
-  LoginResult
+  LoginResult,
+  TeacherSettings
 } from '../types/game';
 
-// Check environment variables first, then fallback to teacher runtime settings if stored
-const ENV_URL = import.meta.env.VITE_SUPABASE_URL || 'https://qdxllnszugxjofonhuqf.supabase.co';
+// Check environment variables consistently:
+// Primary: VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY
+// Fallback: VITE_SUPABASE_ANON_KEY or configured project endpoint
+const ENV_URL =
+  import.meta.env.VITE_SUPABASE_URL ||
+  'https://qdxllnszugxjofonhuqf.supabase.co';
+
 const ENV_KEY =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_SUPABASE_ANON_KEY ||
   'sb_publishable_yMdtPlwC-RSSL_Va_CdrEw_1BtAVK6t';
 
 let activeClient: SupabaseClient | null = null;
-let activeUrl = ENV_URL;
-let activeKey = ENV_KEY;
-
-// Check if credentials are stored in localStorage from teacher settings
-const RUNTIME_SUPABASE_KEY = 'math_adventure_supabase_config_v1';
-if (typeof window !== 'undefined') {
-  try {
-    const saved = localStorage.getItem(RUNTIME_SUPABASE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.url && parsed.key) {
-        activeUrl = parsed.url;
-        activeKey = parsed.key;
-      }
-    }
-  } catch {
-    // Ignore parse error
-  }
-}
+const activeUrl = ENV_URL.trim();
+const activeKey = ENV_KEY.trim();
 
 export function getSupabaseClient(): SupabaseClient | null {
   if (activeClient) return activeClient;
@@ -48,8 +37,8 @@ export function getSupabaseClient(): SupabaseClient | null {
   try {
     activeClient = createClient(activeUrl, activeKey, {
       auth: {
-        persistSession: true,
-        autoRefreshToken: true
+        persistSession: false, // Pure database client without local user session pollution
+        autoRefreshToken: false
       }
     });
     return activeClient;
@@ -67,32 +56,20 @@ export function getSupabaseConfig(): { url: string; key: string } {
   return { url: activeUrl, key: activeKey };
 }
 
-export function updateSupabaseConfig(url: string, key: string) {
-  activeUrl = url.trim();
-  activeKey = key.trim();
-  activeClient = null;
-
-  if (typeof window !== 'undefined') {
-    if (activeUrl && activeKey) {
-      localStorage.setItem(
-        RUNTIME_SUPABASE_KEY,
-        JSON.stringify({ url: activeUrl, key: activeKey })
-      );
-    } else {
-      localStorage.removeItem(RUNTIME_SUPABASE_KEY);
-    }
-  }
-}
-
 /**
- * Tests connection to the Supabase instance
+ * Tests connection to the Supabase instance and verifies core tables exist
  */
-export async function testSupabaseConnection(): Promise<{ success: boolean; message: string }> {
+export async function testSupabaseConnection(): Promise<{
+  success: boolean;
+  message: string;
+  missingTable?: string;
+}> {
   const client = getSupabaseClient();
   if (!client) {
     return {
       success: false,
-      message: 'Supabase credentials not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY or enter them in Cloud Settings.'
+      message:
+        'Supabase credentials are not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.local or Vercel.'
     };
   }
 
@@ -107,12 +84,14 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
       if (error.code === '42P01') {
         return {
           success: false,
-          message: 'Connected to Supabase, but math_levels table was not found. Please run the SQL migration in supabase/migrations/.'
+          missingTable: 'math_levels',
+          message:
+            'Connected to Supabase, but required table "public.math_levels" was not found in the schema cache. Please run the SQL migration script in your Supabase SQL Editor.'
         };
       }
       return {
         success: false,
-        message: `Database error: ${error.message}`
+        message: `Database error: ${error.message} (Code: ${error.code || 'unknown'})`
       };
     }
 
@@ -123,8 +102,95 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
   } catch (err: any) {
     return {
       success: false,
-      message: `Network error connecting to Supabase: ${err.message || 'Unknown error'}`
+      message: `Network error connecting to Supabase: ${err.message || 'Unknown network error'}`
     };
+  }
+}
+
+/**
+ * Delete a level and cascade questions from Supabase
+ */
+export async function deleteLevelFromCloud(levelId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('math_levels').delete().eq('id', levelId);
+    if (error) {
+      console.error('Failed to delete level from Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to delete level:', err);
+    return false;
+  }
+}
+
+/**
+ * Delete a question from Supabase
+ */
+export async function deleteQuestionFromCloud(questionId: string): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('math_questions').delete().eq('id', questionId);
+    if (error) {
+      console.error('Failed to delete question from Supabase:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Failed to delete question:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetch teacher settings (PIN) from Supabase
+ */
+export async function fetchTeacherSettingsFromCloud(): Promise<TeacherSettings | null> {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client
+      .from('math_teacher_settings')
+      .select('*')
+      .eq('id', 'default')
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    return {
+      pin: data.pin_plain || '1234',
+      pinCreated: Boolean(data.pin_created)
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Save teacher settings (PIN) to Supabase
+ */
+export async function saveTeacherSettingsToCloud(settings: TeacherSettings): Promise<boolean> {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('math_teacher_settings').upsert({
+      id: 'default',
+      pin_plain: settings.pin,
+      pin_created: settings.pinCreated,
+      updated_at: new Date().toISOString()
+    });
+
+    return !error;
+  } catch (err) {
+    console.error('Failed to save teacher settings to Supabase:', err);
+    return false;
   }
 }
 

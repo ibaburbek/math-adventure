@@ -19,14 +19,13 @@ import {
   Languages,
   Eye,
   EyeOff,
-  Compass
+  GraduationCap
 } from 'lucide-react';
 
 interface StudentLoginModalProps {
   language: Language;
   soundEnabled: boolean;
   onSuccess: (result: LoginResult) => void;
-  onPlayGuest: () => void;
   onToggleLanguage: () => void;
 }
 
@@ -34,7 +33,6 @@ export const StudentLoginModal: React.FC<StudentLoginModalProps> = ({
   language,
   soundEnabled,
   onSuccess,
-  onPlayGuest,
   onToggleLanguage
 }) => {
   const t = translations[language];
@@ -201,16 +199,16 @@ export const StudentLoginModal: React.FC<StudentLoginModalProps> = ({
           </button>
         </form>
 
-        {/* Guest Mode option */}
-        <div className="pt-5 mt-4 border-t border-slate-800 text-center">
-          <button
-            type="button"
-            onClick={onPlayGuest}
-            className="text-xs font-semibold text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer flex items-center justify-center gap-1.5 mx-auto"
-          >
-            <Compass className="w-3.5 h-3.5" />
-            <span>{t.loginGuestBtn}</span>
-          </button>
+        {/* Teacher Note */}
+        <div className="pt-4 mt-4 border-t border-slate-800 text-center">
+          <p className="text-[11px] text-slate-400 flex items-center justify-center gap-1.5">
+            <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
+            <span>
+              {language === 'kk'
+                ? 'Код пен PIN-кодты мұғаліміңізден алыңыз'
+                : 'Код и PIN-код выдаются учителем в кабинете'}
+            </span>
+          </p>
         </div>
       </div>
     </div>
